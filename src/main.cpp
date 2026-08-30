@@ -17,6 +17,10 @@ static volatile uint8_t rawA = 0;
 static volatile uint8_t rawB = 0;
 static volatile uint32_t lastPacketMillis = 0;
 
+// Latching E-stop: once IO8 is pressed, motors stay disabled until the board
+// is power-cycled (or reset) — set-only, nothing in this firmware clears it.
+static bool estopLatched = false;
+
 enum LedColor { LED_UNSET, LED_OFF, LED_BLUE, LED_AMBER, LED_GREEN, LED_RED };
 static LedColor currentLed = LED_UNSET;
 
@@ -79,9 +83,9 @@ void setup() {
   pinMode(PIN_LED_B, OUTPUT);
   setLed(LED_OFF);
 
-  // Kill switch: active low, external pull-up fitted. Internal pull-up is
-  // redundant but harmless, and keeps the pin from floating high (disabled
-  // = safe) if the external pull-up is ever missing during bring-up.
+  // E-stop button: active low, external pull-up fitted. Internal pull-up is
+  // redundant but harmless. Outputs are enabled by default; pressing this
+  // latches them off until power-cycle (see estopLatched in loop()).
   pinMode(PIN_SWITCH, INPUT_PULLUP);
 
   ledcAttach(PIN_ENA, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
@@ -92,9 +96,14 @@ void setup() {
   WiFi.setSleep(false); // avoid modem-sleep latency spikes on the control loop
   WiFi.mode(WIFI_AP);
 
-  String mac = WiFi.softAPmacAddress(); // "AA:BB:CC:DD:EE:FF"
-  mac.replace(":", "");
-  String ssid = String(WIFI_SSID_PREFIX) + mac.substring(6); // last 3 bytes
+  // WiFi.softAPmacAddress() reads back as all-zero here — the AP interface
+  // isn't actually up yet at this point (before WiFi.softAP() below). Read
+  // the factory-burned base MAC straight from eFuse instead; it's valid
+  // immediately and doesn't depend on WiFi driver bring-up order.
+  uint64_t chipMac = ESP.getEfuseMac();
+  char suffix[7];
+  snprintf(suffix, sizeof(suffix), "%06X", (unsigned int)(chipMac & 0xFFFFFF));
+  String ssid = String(WIFI_SSID_PREFIX) + suffix;
   WiFi.softAP(ssid.c_str(), WIFI_PASSPHRASE);
 
   Serial.print("AP SSID: ");
@@ -108,7 +117,7 @@ void setup() {
   server.addHandler(&ws);
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send_P(200, "text/html", INDEX_HTML);
+    request->send(200, "text/html", INDEX_HTML);
   });
   server.onNotFound([](AsyncWebServerRequest *request) {
     request->redirect("/"); // captive-portal probes land here
@@ -124,18 +133,15 @@ void loop() {
 
   bool clientConnected = ws.count() > 0;
   bool failsafeTripped = (millis() - lastPacketMillis) > FAILSAFE_TIMEOUT_MS;
-  bool killSwitchClosed = digitalRead(PIN_SWITCH) == LOW;
+
+  if (digitalRead(PIN_SWITCH) == LOW) {
+    estopLatched = true; // sticky — only a reset/power-cycle clears this
+  }
 
   uint8_t dutyA = mapDuty(rawA);
   uint8_t dutyB = mapDuty(rawB);
 
-  if (!clientConnected || failsafeTripped) {
-    dutyA = 0;
-    dutyB = 0;
-  }
-  if (!killSwitchClosed) {
-    // Independent physical cutout: motors stay off regardless of what the
-    // network side is commanding.
+  if (!clientConnected || failsafeTripped || estopLatched) {
     dutyA = 0;
     dutyB = 0;
   }
@@ -143,7 +149,12 @@ void loop() {
   ledcWrite(PIN_ENA, dutyA);
   ledcWrite(PIN_ENB, dutyB);
 
-  if (!clientConnected) {
+  if (estopLatched) {
+    // Blinking red so it reads as distinct from the solid-red failsafe
+    // state: this one needs a power-cycle, failsafe clears itself.
+    bool blinkOn = (millis() / 250) % 2 == 0;
+    setLed(blinkOn ? LED_RED : LED_OFF);
+  } else if (!clientConnected) {
     setLed(LED_BLUE);
   } else if (failsafeTripped) {
     setLed(LED_RED);

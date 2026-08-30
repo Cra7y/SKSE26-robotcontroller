@@ -20,9 +20,9 @@ alternative assignments; there are no spare pins to move to.
 
 | Pin   | Function                    | Notes                                      |
 |-------|-----------------------------|--------------------------------------------|
-| IO7   | L298N `ENA` (PWM, motor A)  | Only free output. Header H2 pin 1.          |
-| IO20  | L298N `ENB` (PWM, motor B)  | Only free output. Header H2 pin 2.          |
-| IO8   | Switch input                | **Active low**, external pull-up fitted.    |
+| IO7   | L298N `IN1` (PWM, motor A)  | Only free output. Header H2 pin 1.          |
+| IO20  | L298N `IN3` (PWM, motor B)  | Only free output. Header H2 pin 2.          |
+| IO8   | E-stop button               | **Active low**, external pull-up fitted. Outputs are on by default; a press latches both motors off until power-cycle — see *Behaviour spec*. |
 | IO19  | RGB LED — green             | Status only, digital on/off.                |
 | IO22  | RGB LED — red               | Status only, digital on/off.                |
 | IO21  | RGB LED — blue              | Status only, digital on/off.                |
@@ -36,16 +36,26 @@ RGB LED is common-anode
 
 ## L298N wiring
 
-Direction is hardwired so both motors need only one control line each:
+**Corrected on the bench** — the wiring below is what's actually built, not
+the ENA/ENB-PWM scheme originally drafted here (that draft had it backwards:
+PWM belongs on the direction inputs in this build, not the enables).
 
-- `IN1` → 5 V, `IN2` → GND (motor A locked forward)
-- `IN3` → 5 V, `IN4` → GND (motor B locked forward)
-- `ENA` → IO7, `ENB` → IO20 — **the ENA/ENB jumpers on the breakout must be
-  removed**, otherwise the enables are tied high and PWM does nothing.
+Direction is hardwired so both motors need only one control line each, and
+speed comes from PWM-ing that line instead of the enable pin:
+
+- `ENA`/`ENB` jumpers **stay on the breakout** — both channels permanently
+  enabled.
+- `IN1` → IO7 (PWM), `IN2` → GND (motor A locked forward, speed = duty cycle
+  on IN1)
+- `IN3` → IO20 (PWM), `IN4` → GND (motor B locked forward, speed = duty cycle
+  on IN3)
 - ESP32 GND and L298N GND must be common.
 
-3.3 V logic into the L298N enable inputs is fine: the L298 datasheet specifies
-V_IH min of 2.3 V.
+Verified on the bench: driving IN1 with a static 3.3 V spins the motor, which
+also confirmed the L298N/motor/power chain independently of firmware.
+
+3.3 V logic into the L298N inputs is fine: the L298 datasheet specifies V_IH
+min of 2.3 V.
 
 ## Firmware stack
 
@@ -130,16 +140,27 @@ out of range produces no FIN, and the socket can take tens of seconds to notice.
 Screen lock and tab backgrounding also suspend the browser's timers, which
 correctly trips this timeout.
 
+**E-stop:** IO8 is a latching emergency stop, not a hold-to-enable switch.
+Motors are enabled by default at boot; the instant the button is pressed
+(active low), both motors are forced to zero duty and stay there — nothing
+in firmware clears this. The only way out is a reset or power-cycle. This is
+deliberate: a hold-to-run switch is easy to bump back to "enabled" without
+noticing, a latch is not.
+
 **RGB LED status (digital, on/off combinations):**
 
-| State                              | Colour            |
-|------------------------------------|-------------------|
-| AP up, no client connected         | Blue              |
-| Client connected, throttle at zero | Amber (red+green) |
-| Live, motors commanded             | Green             |
-| Failsafe tripped                   | Red               |
+| State                              | Colour              |
+|------------------------------------|---------------------|
+| AP up, no client connected         | Blue                |
+| Client connected, throttle at zero | Amber (red+green)   |
+| Live, motors commanded             | Green               |
+| Failsafe tripped                   | Red (solid)         |
+| E-stop latched                     | Red (blinking)      |
 
-Blink patterns are fine and cost nothing; PWM breathing is explicitly not wanted.
+E-stop takes priority over every other state. Blink patterns are fine and
+cost nothing; PWM breathing is explicitly not wanted. Solid vs. blinking red
+is the only way to tell a self-clearing failsafe apart from a latched E-stop
+that needs a power-cycle — don't collapse them to the same indication.
 
 **Network:** SoftAP, SSID `servo-remote` (rename), WPA2, ≥8 char passphrase.
 Wildcard `DNSServer` on port 53 so the phone's captive-portal probe opens the
