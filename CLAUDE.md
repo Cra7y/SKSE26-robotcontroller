@@ -162,9 +162,58 @@ cost nothing; PWM breathing is explicitly not wanted. Solid vs. blinking red
 is the only way to tell a self-clearing failsafe apart from a latched E-stop
 that needs a power-cycle — don't collapse them to the same indication.
 
-**Network:** SoftAP, SSID `servo-remote` (rename), WPA2, ≥8 char passphrase.
-Wildcard `DNSServer` on port 53 so the phone's captive-portal probe opens the
-control page automatically. `server.onNotFound` redirects to the UI.
+**Network:** SoftAP, SSID `servo-remote-<per-board suffix>`, WPA2, ≥8 char
+passphrase, fixed IP `192.168.4.1` (the ESP32 SoftAP default — never
+overridden).
+
+**Captive portal is deliberately suppressed, not offered.** The obvious design
+is a wildcard `DNSServer` plus `onNotFound` → redirect, so the phone's OS
+detects a captive portal and opens the control page automatically. Tried that;
+dropped it. Android's own captive-portal sign-in browser
+(`CaptivePortalLoginActivity`) wraps the page in a native `SwipeRefreshLayout`
+that intercepts touch gestures at the Android view layer — a slider drag
+toward the bottom of the screen gets read as pull-to-refresh and reloads the
+page mid-drive. This is outside the page's reach: `overscroll-behavior: none`,
+a non-passive `touchmove` blocker, and safe-area bottom padding were all tried
+and none of it helps, because the interception happens above the DOM.
+
+So instead, the firmware answers each OS's connectivity-check probe with
+exactly what it expects (`/generate_204`, `/gen_204` → empty `204`;
+`/hotspot-detect.html`, `/library/test/success.html` → Apple's literal
+"Success" body; `/connecttest.txt`, `/ncsi.txt` → Windows' expected text) —
+see the `server.on(...)` block in `setup()` before `onNotFound`. No OS
+concludes sign-in is required, so none of them auto-launch their own browser.
+The DNS wildcard and `onNotFound` → redirect stay in place regardless
+(harmless, and still catch stray/mistyped navigation), but they no longer
+drive the primary UX.
+
+The trade-off: no more auto-opening popup, on any platform. Users connect to
+the AP and manually open Chrome (or equivalent) themselves, then browse to
+`http://192.168.4.1/`. There's no on-page reminder of that address — it's
+only useful to someone who's already reached the page, i.e. already has it —
+so users need to know the address up front some other way.
+
+**A memorable name instead of the raw IP is already possible, for free.** The
+wildcard `DNSServer` answers *any* hostname a connected client queries with
+the AP's own IP — that's the same mechanism that was driving the captive-
+portal auto-popups. So `http://servo/` (any single label; the `http://` is
+needed or Chrome's address bar treats it as a search query instead of a URL)
+already resolves and loads the page today, no extra firmware needed. Two
+things that look like better options but don't actually work here, for future
+reference:
+
+- **`servo.local` via mDNS** — doable with `ESPmDNS`, and works well on iOS/
+  macOS (native Bonjour). Deliberately not added: it does *not* reliably
+  resolve on Android Chrome, which is the platform this has actually been
+  tested against — Android's mDNS support (NSD) isn't hooked into ordinary
+  browser hostname resolution the way Bonjour is on Apple platforms.
+- **A DNS record on a real domain pointing at `192.168.4.1`** — can't work at
+  all, not just impractical: resolving that record requires the phone to
+  reach the domain's real DNS servers over the actual internet, which the
+  SoftAP doesn't have. Even if resolved via cellular data, `192.168.4.1` is
+  only routable while joined to this specific AP, and Android won't reliably
+  send the resulting HTTP request over the WiFi interface instead of the
+  cellular one that just answered the DNS query.
 
 **UI:** single HTML page embedded in `PROGMEM` as a raw string literal — no
 LittleFS, no build-time asset pipeline. `touch-action: none`, pointer events with

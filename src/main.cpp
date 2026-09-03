@@ -119,8 +119,34 @@ void setup() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/html", INDEX_HTML);
   });
+
+  // Answer each OS's connectivity-check probe with exactly what it expects,
+  // so none of them conclude this AP "requires sign-in" and auto-launch
+  // their own captive-portal browser. That browser (at least Android's) has
+  // an unfixable-from-page-content pull-to-refresh bug — see CLAUDE.md,
+  // "Network". Users open Chrome themselves and browse to the AP's fixed IP.
+  server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(204); // Android / ChromeOS
+  });
+  server.on("/gen_204", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(204); // Android (older)
+  });
+  server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+    // iOS/macOS check the body for this exact string, not just the status.
+    request->send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
+  });
+  server.on("/library/test/success.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
+  });
+  server.on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "Microsoft Connect Test"); // Windows
+  });
+  server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "Microsoft NCSI"); // Windows
+  });
+
   server.onNotFound([](AsyncWebServerRequest *request) {
-    request->redirect("/"); // captive-portal probes land here
+    request->redirect("/"); // anything else stray lands on the control page
   });
 
   server.begin();

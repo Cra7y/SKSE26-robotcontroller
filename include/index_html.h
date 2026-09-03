@@ -32,18 +32,6 @@ const char INDEX_HTML[] PROGMEM = R"HTMLPAGE(
     background: #833; transition: background 0.15s;
   }
   #dot.connected { background: #3a3; }
-  #chromeHint {
-    position: fixed; top: 44px; left: 0; right: 0; z-index: 10;
-    background: #241c08; color: #e8c468; border-bottom: 1px solid #3a2f10;
-    font-size: 12.5px; line-height: 1.4; padding: 8px 34px 8px 12px;
-    box-sizing: border-box;
-  }
-  #chromeHint a { color: #ffd76a; }
-  #chromeHintClose {
-    position: absolute; top: 4px; right: 4px; width: 28px; height: 28px;
-    border: none; background: transparent; color: #e8c468; font-size: 18px;
-    line-height: 1;
-  }
   .zone {
     position: fixed; top: 44px; bottom: 0; width: 50%;
     display: flex; align-items: flex-end; justify-content: center;
@@ -79,11 +67,6 @@ const char INDEX_HTML[] PROGMEM = R"HTMLPAGE(
 </head>
 <body>
   <div id="status"><span id="dot"></span><span id="statusText">connecting…</span></div>
-  <div id="chromeHint">
-    Sliders unreliable in this popup — for best results, open Chrome
-    yourself and go to <a href="http://192.168.4.1/">http://192.168.4.1/</a>
-    <button id="chromeHintClose" aria-label="Dismiss">&times;</button>
-  </div>
   <div class="zone zoneA" id="zoneA">
     <div class="track" id="trackA">
       <div class="fill" id="fillA"></div>
@@ -154,27 +137,6 @@ const char INDEX_HTML[] PROGMEM = R"HTMLPAGE(
 
   makeZone("zoneA", "trackA", "fillA", "pctA");
   makeZone("zoneB", "trackB", "fillB", "pctB");
-
-  // --- "Open in Chrome" hint banner -----------------------------------
-  // Measures actual rendered height rather than hardcoding it, since the
-  // banner's text wraps differently across screen widths.
-  var statusBar = document.getElementById("status");
-  var hintBar = document.getElementById("chromeHint");
-  var zoneA = document.getElementById("zoneA");
-  var zoneB = document.getElementById("zoneB");
-
-  function layoutZones() {
-    var top = statusBar.offsetHeight + (hintBar.hidden ? 0 : hintBar.offsetHeight);
-    zoneA.style.top = top + "px";
-    zoneB.style.top = top + "px";
-  }
-  layoutZones();
-  window.addEventListener("resize", layoutZones);
-
-  document.getElementById("chromeHintClose").addEventListener("click", function () {
-    hintBar.hidden = true;
-    layoutZones();
-  });
 
   // Belt-and-braces: overscroll-behavior above is what actually disables
   // Chrome's pull-to-refresh, but block the underlying touchmove too in case
