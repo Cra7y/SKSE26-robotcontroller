@@ -100,9 +100,14 @@ void setup() {
   // isn't actually up yet at this point (before WiFi.softAP() below). Read
   // the factory-burned base MAC straight from eFuse instead; it's valid
   // immediately and doesn't depend on WiFi driver bring-up order.
+  // getEfuseMac() packs the MAC's first byte into the low end of the
+  // returned uint64 and its last byte into the high end. The low 24 bits
+  // are therefore the manufacturer OUI, which is identical across a
+  // manufacturing batch -- the per-chip unique bytes are the *upper* 24
+  // bits of the 48-bit MAC, hence the >> 24 here.
   uint64_t chipMac = ESP.getEfuseMac();
   char suffix[7];
-  snprintf(suffix, sizeof(suffix), "%06X", (unsigned int)(chipMac & 0xFFFFFF));
+  snprintf(suffix, sizeof(suffix), "%06X", (unsigned int)((chipMac >> 24) & 0xFFFFFF));
   String ssid = String(WIFI_SSID_PREFIX) + suffix;
   WiFi.softAP(ssid.c_str(), WIFI_PASSPHRASE);
 
